@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wardogs Base Builder</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚔️</span>
+      <div>
+        <h1>Wardogs Base Builder</h1>
+        <p class="sub">Top-down 2D base planner &middot; runs fully offline</p>
+      </div>
+    </div>
+
+    <div class="topbar-controls">
+      <label class="field">
+        <span>Area W</span>
+        <input id="areaWidth" type="number" min="8" max="400" value="60" />
+      </label>
+      <label class="field">
+        <span>Area H</span>
+        <input id="areaHeight" type="number" min="8" max="400" value="40" />
+      </label>
+      <label class="field">
+        <span>Tile (m)</span>
+        <input id="tileMeters" type="number" min="0.25" max="10" step="0.25" value="1" />
+      </label>
+      <button id="applyArea" class="btn">Apply Area</button>
+
+      <span class="divider"></span>
+
+      <button id="toggleGrid" class="btn ghost" aria-pressed="true">Grid</button>
+      <button id="toggleSnap" class="btn ghost" aria-pressed="true">Snap</button>
+      <button id="toggleCollide" class="btn ghost" aria-pressed="true">Collisions</button>
+
+      <span class="divider"></span>
+
+      <button id="saveBtn" class="btn ghost">Save</button>
+      <button id="loadBtn" class="btn ghost">Load</button>
+      <button id="exportBtn" class="btn ghost">Export</button>
+      <button id="importBtn" class="btn ghost">Import</button>
+      <button id="clearBtn" class="btn danger">Clear</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- Palette -->
+    <aside class="palette" id="palette">
+      <div class="palette-head">
+        <h2>Buildables</h2>
+        <input id="search" type="search" placeholder="Search…" />
+      </div>
+      <div class="palette-list" id="paletteList"><!-- populated by JS --></div>
+      <p class="palette-note">
+        Drag an item onto the grid, or click it then click the grid to place.
+      </p>
+    </aside>
+
+    <!-- Canvas stage -->
+    <main class="stage" id="stage">
+      <canvas id="canvas"></canvas>
+
+      <div class="stage-overlay">
+        <div class="hud" id="hud">
+          <span id="coordReadout">–</span>
+          <span id="zoomReadout">100%</span>
+        </div>
+        <div class="ghost-name" id="ghostName"></div>
+      </div>
+
+      <div class="stage-toolbar">
+        <button class="tool" id="rotateBtn" title="Rotate (R)">⟳</button>
+        <button class="tool" id="deleteBtn" title="Delete (Del)">🗑</button>
+        <button class="tool" id="dupeBtn" title="Duplicate (D)">⧉</button>
+        <span class="divider vertical"></span>
+        <button class="tool" id="zoomOut" title="Zoom out (-)">−</button>
+        <button class="tool" id="zoomReset" title="Reset view (0)">◎</button>
+        <button class="tool" id="zoomIn" title="Zoom in (+)">＋</button>
+        <span class="divider vertical"></span>
+        <button class="tool" id="cancelTool" title="Deselect (Esc)">✕</button>
+      </div>
+    </main>
+
+    <!-- Inspector -->
+    <aside class="inspector">
+      <section class="panel">
+        <h2>Selection</h2>
+        <div id="selectionInfo" class="selection-info muted">Nothing selected.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Layout Stats</h2>
+        <ul class="stats" id="stats"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Legend</h2>
+        <ul class="legend" id="legend"></ul>
+      </section>
+    </aside>
+  </div>
+
+  <input type="file" id="fileInput" accept="application/json" hidden />
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
