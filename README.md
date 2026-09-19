@@ -70,7 +70,14 @@ All placeable objects live in [`js/data.js`](js/data.js). Each entry is:
 - `cat` groups the item in the palette and picks its color (see
   `CATEGORY_COLORS` at the top of the file).
 
-> **Note on data:** the object list and footprints are a structured starting
-> catalog for Wardogs, organized so you can drop in the exact in-game
-> dimensions as they're confirmed — just edit the numbers in `data.js`. Nothing
-> else needs to change.
+### Data source
+
+The catalog in `data.js` is **real WARDOGS data**. Each buildable's name,
+category, build cost, and health come from the live in-game buildable
+definitions, and its footprint is taken from the object's in-game **collision
+box** (in metres). WARDOGS builds on a **1.5 m grid**, so each tile = 1.5 m and
+the tile footprints are the metre dimensions ÷ 1.5. The planner defaults to that
+scale, and every item stores both its tile and metre size plus cost/HP.
+
+If the game is patched and a size or cost changes, just edit that entry's numbers
+in `data.js` — the stats, collisions, and rendering all update automatically.

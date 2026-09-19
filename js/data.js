@@ -1,96 +1,83 @@
 /*
- * Wardogs buildable catalog
- * -------------------------
- * Each entry describes a placeable object.
+ * WARDOGS buildable catalog — REAL in-game data
+ * ---------------------------------------------
+ * Sourced from the live WARDOGS buildable definitions (footprints taken from
+ * each object's in-game collision box). The game's build grid is 1.5 m, so tile
+ * footprints below are the metre dimensions divided by 1.5 and rounded.
  *
- *   id     unique key (stable, used in save files)
- *   name   display name
- *   cat    category (used for grouping + legend colors)
- *   w, h   footprint in TILES (see tileMeters in the app for real-world scale)
- *   color  fill color on the grid
- *   note   optional short description
+ * Each entry:
+ *   id     stable in-game id
+ *   name   in-game display name
+ *   cat    palette category (Command / Hesco / Bunkers / Barriers / Recon /
+ *          Defences / Support)
+ *   w, h   footprint in TILES (1 tile = 1.5 m)
+ *   mW, mD footprint in METRES (width × depth), from the collision box
+ *   cost   build supply cost
+ *   hp     structure health
+ *   color  fill on the grid (from the category, see CATEGORY_COLORS)
  *
- * Sizes are expressed in whole tiles for clean grid snapping. If you have exact
- * in-game dimensions, edit w/h here and everything (stats, collisions, rendering)
- * updates automatically. Categories drive the legend colors below.
+ * TILE_METERS is the real-world size of one tile; the app defaults to it.
  */
 
-const CATEGORY_COLORS = {
-  "Command":    "#4ea1ff",
-  "Defense":    "#e5484d",
-  "Walls":      "#8b98a9",
-  "Production":  "#f2c94c",
-  "Resource":   "#3fb950",
-  "Storage":    "#b06ad6",
-  "Support":    "#ff7a29",
-  "Vehicles":   "#56c5d0",
-  "Decor":      "#7d8896"
+var TILE_METERS = 1.5;
+
+var CATEGORY_COLORS = {
+  "Command":  "#4ea1ff",
+  "Hesco":    "#d9a441",
+  "Bunkers":  "#8b98a9",
+  "Barriers": "#c07a3c",
+  "Recon":    "#56c5d0",
+  "Defences": "#e5484d",
+  "Support":  "#ff7a29"
 };
 
-const BUILDABLES = [
+var BUILDABLES = [
   // ---- Command ----
-  { id: "command_center", name: "Command Center", cat: "Command", w: 6, h: 6, note: "Core HQ structure" },
-  { id: "radar_tower",    name: "Radar Tower",    cat: "Command", w: 3, h: 3, note: "Reveals the map" },
-  { id: "comms_relay",    name: "Comms Relay",    cat: "Command", w: 2, h: 2 },
+  { id: "fob",           name: "Forward Operating Base", cat: "Command",  w: 2, h: 2, mW: 2.03, mD: 2.0,  cost: 30,   hp: 15000, note: "Core structure — enables most buildables" },
 
-  // ---- Defense ----
-  { id: "turret_mg",      name: "MG Turret",      cat: "Defense", w: 2, h: 2, note: "Anti-infantry" },
-  { id: "turret_cannon",  name: "Cannon Turret",  cat: "Defense", w: 3, h: 3, note: "Anti-vehicle" },
-  { id: "turret_aa",      name: "AA Turret",      cat: "Defense", w: 3, h: 3, note: "Anti-air" },
-  { id: "mortar_pit",     name: "Mortar Pit",     cat: "Defense", w: 3, h: 3, note: "Splash / long range" },
-  { id: "tesla_coil",     name: "Shock Tower",    cat: "Defense", w: 2, h: 2 },
-  { id: "bunker",         name: "Bunker",         cat: "Defense", w: 4, h: 4, note: "Garrison troops" },
-  { id: "mine_field",     name: "Mine Field",     cat: "Defense", w: 2, h: 2 },
+  // ---- Hesco ----
+  { id: "hblock",        name: "Hesco Block (Small)",    cat: "Hesco",    w: 1, h: 1, mW: 1.5,  mD: 1.5,  cost: 13,   hp: 1600 },
+  { id: "tallhblock",    name: "Hesco Block (Large)",    cat: "Hesco",    w: 1, h: 1, mW: 1.5,  mD: 1.5,  cost: 19,   hp: 2250 },
+  { id: "hblockquadwall",name: "Hesco Wall",             cat: "Hesco",    w: 1, h: 4, mW: 1.5,  mD: 6.0,  cost: 61,   hp: 4600 },
+  { id: "gate",          name: "Gate",                   cat: "Hesco",    w: 1, h: 4, mW: 1.5,  mD: 6.0,  cost: 69,   hp: 5320, note: "Vehicle passage" },
+  { id: "door",          name: "Door",                   cat: "Hesco",    w: 1, h: 1, mW: 1.5,  mD: 1.5,  cost: 19,   hp: 500 },
 
-  // ---- Walls ----
-  { id: "wall",           name: "Wall Segment",   cat: "Walls",   w: 1, h: 1 },
-  { id: "wall_corner",    name: "Wall Corner",    cat: "Walls",   w: 1, h: 1 },
-  { id: "gate",           name: "Gate",           cat: "Walls",   w: 3, h: 1, note: "Vehicle passage" },
-  { id: "barricade",      name: "Barricade",      cat: "Walls",   w: 2, h: 1 },
-  { id: "dragon_teeth",   name: "Tank Traps",     cat: "Walls",   w: 2, h: 2 },
+  // ---- Bunkers ----
+  { id: "bunker",        name: "Bunker",                 cat: "Bunkers",  w: 4, h: 4, mW: 6.0,  mD: 6.0,  cost: 81,   hp: 5000, note: "Garrison structure" },
+  { id: "airraidshelter",name: "Indirect Fire Shelter",  cat: "Bunkers",  w: 5, h: 5, mW: 7.5,  mD: 7.5,  cost: 81,   hp: 5000, note: "Cover from indirect fire" },
 
-  // ---- Production ----
-  { id: "barracks",       name: "Barracks",       cat: "Production", w: 5, h: 4, note: "Train infantry" },
-  { id: "war_factory",    name: "War Factory",    cat: "Production", w: 6, h: 5, note: "Build vehicles" },
-  { id: "airfield",       name: "Airfield",       cat: "Production", w: 8, h: 5, note: "Build aircraft" },
-  { id: "workshop",       name: "Workshop",       cat: "Production", w: 4, h: 4, note: "Repairs & upgrades" },
-  { id: "research_lab",   name: "Research Lab",   cat: "Production", w: 5, h: 5 },
+  // ---- Barriers ----
+  { id: "sandbagwall",   name: "Sandbag Wall",           cat: "Barriers", w: 2, h: 1, mW: 3.0,  mD: 0.34, cost: 13,   hp: 735 },
+  { id: "bremmerwall",   name: "Bremer Wall",            cat: "Barriers", w: 1, h: 1, mW: 1.5,  mD: 1.5,  cost: 13,   hp: 6500 },
+  { id: "barbedwire",    name: "Barbed Wire",            cat: "Barriers", w: 1, h: 2, mW: 1.5,  mD: 3.0,  cost: 7,    hp: 250 },
+  { id: "tanktrap",      name: "Hedgehog",               cat: "Barriers", w: 1, h: 1, mW: 2.2,  mD: 2.2,  cost: 19,   hp: 4500, note: "Anti-vehicle" },
 
-  // ---- Resource ----
-  { id: "fuel_refinery",  name: "Fuel Refinery",  cat: "Resource", w: 5, h: 5, note: "Processes fuel" },
-  { id: "ore_drill",      name: "Ore Drill",      cat: "Resource", w: 3, h: 3, note: "Extracts ore" },
-  { id: "power_plant",    name: "Power Plant",    cat: "Resource", w: 4, h: 4, note: "Supplies power" },
-  { id: "solar_array",    name: "Solar Array",    cat: "Resource", w: 4, h: 2 },
-  { id: "water_pump",     name: "Water Pump",     cat: "Resource", w: 2, h: 2 },
+  // ---- Recon ----
+  { id: "camonettent",   name: "Recon Tent",             cat: "Recon",    w: 2, h: 3, mW: 2.32, mD: 4.18, cost: 5,    hp: 300 },
+  { id: "crowsnest",     name: "Recon Tower",            cat: "Recon",    w: 4, h: 4, mW: 6.0,  mD: 6.0,  cost: 81,   hp: 5000, note: "Elevated observation" },
 
-  // ---- Storage ----
-  { id: "supply_depot",   name: "Supply Depot",   cat: "Storage", w: 4, h: 4 },
-  { id: "fuel_tank",      name: "Fuel Tank",      cat: "Storage", w: 2, h: 2 },
-  { id: "ammo_dump",      name: "Ammo Dump",      cat: "Storage", w: 3, h: 2 },
-  { id: "silo",           name: "Storage Silo",   cat: "Storage", w: 2, h: 2 },
+  // ---- Defences ----
+  { id: "l81-mortar",    name: "L81 Mortar",             cat: "Defences", w: 3, h: 3, mW: 4.5,  mD: 4.5,  cost: 121,  hp: 3000, note: "Indirect fire" },
+  { id: "stingray",      name: "Stingray",               cat: "Defences", w: 3, h: 3, mW: 4.5,  mD: 4.5,  cost: 121,  hp: 3000 },
+  { id: "talon-sam",     name: "Talon 9K-SAM",           cat: "Defences", w: 2, h: 2, mW: 3.0,  mD: 3.0,  cost: 801,  hp: 3000, note: "Anti-air (SAM)" },
+  { id: "vanguard-ciws", name: "Vanguard CIWS",          cat: "Defences", w: 4, h: 4, mW: 6.0,  mD: 6.0,  cost: 1201, hp: 5000, note: "Anti-air / point defence" },
 
   // ---- Support ----
-  { id: "field_hospital", name: "Field Hospital", cat: "Support", w: 4, h: 3, note: "Heals units" },
-  { id: "repair_bay",     name: "Repair Bay",     cat: "Support", w: 4, h: 4 },
-  { id: "shield_gen",     name: "Shield Generator", cat: "Support", w: 3, h: 3 },
-  { id: "watchtower",     name: "Watchtower",     cat: "Support", w: 2, h: 2 },
-
-  // ---- Vehicles / pads ----
-  { id: "helipad",        name: "Helipad",        cat: "Vehicles", w: 4, h: 4 },
-  { id: "vehicle_pad",    name: "Vehicle Pad",    cat: "Vehicles", w: 3, h: 3 },
-  { id: "landing_zone",   name: "Landing Zone",   cat: "Vehicles", w: 6, h: 6 },
-
-  // ---- Decor / misc ----
-  { id: "flag",           name: "Flag Pole",      cat: "Decor",   w: 1, h: 1 },
-  { id: "crate",          name: "Crate Stack",    cat: "Decor",   w: 1, h: 1 },
-  { id: "sandbags",       name: "Sandbags",       cat: "Decor",   w: 2, h: 1 },
-  { id: "road",           name: "Road Tile",      cat: "Decor",   w: 1, h: 1 }
+  { id: "radio",         name: "Builder's Radio",        cat: "Support",  w: 1, h: 2, mW: 1.5,  mD: 3.0,  cost: 17,   hp: 1000, note: "Enables nearby building" },
+  { id: "loudspeaker",   name: "Loudspeaker",            cat: "Support",  w: 2, h: 2, mW: 3.0,  mD: 3.0,  cost: 81,   hp: 1000 },
+  { id: "refuelstation", name: "Refuel Station",         cat: "Support",  w: 2, h: 2, mW: 3.01, mD: 3.0,  cost: 161,  hp: 1600, note: "Refuels vehicles" },
+  { id: "repairstation", name: "Repair Station",         cat: "Support",  w: 2, h: 2, mW: 3.0,  mD: 3.0,  cost: 161,  hp: 1600, note: "Repairs vehicles" },
+  { id: "drillrig",      name: "Drill Rig",              cat: "Support",  w: 3, h: 4, mW: 4.5,  mD: 6.0,  cost: 1801, hp: 2500, note: "Resource extraction" }
 ];
 
-// Attach category color to each buildable for convenience.
+// Attach category color to each buildable.
 BUILDABLES.forEach(function (b) {
   b.color = b.color || CATEGORY_COLORS[b.cat] || "#7d8896";
 });
 
 // Expose globally (no modules, so the app works from file://).
-window.WARDOGS = { BUILDABLES: BUILDABLES, CATEGORY_COLORS: CATEGORY_COLORS };
+window.WARDOGS = {
+  BUILDABLES: BUILDABLES,
+  CATEGORY_COLORS: CATEGORY_COLORS,
+  TILE_METERS: TILE_METERS
+};

@@ -15,7 +15,7 @@
   // ---------------------------------------------------------------- State
   var state = {
     grid: { w: 60, h: 40 },   // in tiles
-    tileMeters: 1,
+    tileMeters: window.WARDOGS.TILE_METERS || 1.5,  // WARDOGS build grid is 1.5 m
     objects: [],              // { uid, id, x, y, rot }  (x,y = top-left tile, rot in {0,90,180,270})
     selectedUid: null,
     tool: null,               // buildable id currently armed for placing
@@ -331,11 +331,12 @@
 
   function renderStats() {
     var used = 0;
-    var counts = {};
+    var totalCost = 0;
     state.objects.forEach(function (o) {
       var f = footprint(o);
       used += f.w * f.h;
-      counts[o.cat || (BY_ID[o.id] && BY_ID[o.id].cat)] = (counts[BY_ID[o.id].cat] || 0) + 1;
+      var b = BY_ID[o.id];
+      if (b && b.cost != null) totalCost += b.cost;
     });
     var total = state.grid.w * state.grid.h;
     var m = state.tileMeters;
@@ -343,6 +344,7 @@
       ["Grid", state.grid.w + " × " + state.grid.h + " tiles"],
       ["Real size", (state.grid.w * m) + " × " + (state.grid.h * m) + " m"],
       ["Objects", String(state.objects.length)],
+      ["Total cost", totalCost.toLocaleString() + " supply"],
       ["Tiles used", used + " / " + total + " (" + Math.round((used / total) * 100) + "%)"],
       ["Area used", (used * m * m).toLocaleString() + " m²"]
     ];
@@ -366,6 +368,9 @@
       row("Name", b.name) +
       row("Category", b.cat) +
       row("Footprint", f.w + " × " + f.h + " tiles") +
+      row("Real size", (b.mW || b.w) + " × " + (b.mD || b.h) + " m") +
+      (b.cost != null ? row("Build cost", b.cost + " supply") : "") +
+      (b.hp != null ? row("Health", b.hp.toLocaleString() + " HP") : "") +
       row("Position", "x " + sel.x + ", y " + sel.y) +
       row("Rotation", sel.rot + "°") +
       '<div class="sel-actions">' +
@@ -419,7 +424,10 @@
             '<span class="swatch" style="background:' + b.color + '"></span>' +
             '<div class="item-meta">' +
               '<div class="item-name">' + b.name + "</div>" +
-              '<div class="item-size">' + b.w + " × " + b.h + " tiles</div>" +
+              '<div class="item-size">' + b.w + "×" + b.h + " tiles · " +
+                (b.mW || b.w) + "×" + (b.mD || b.h) + " m" +
+                (b.cost != null ? " · " + b.cost + " supply" : "") +
+              "</div>" +
             "</div>" +
           "</div>";
       });
