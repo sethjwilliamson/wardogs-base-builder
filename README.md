@@ -35,6 +35,8 @@ Just open `index.html` in any modern browser (double-click it).
 | Action | Input |
 | --- | --- |
 | Place armed item | Click on grid |
+| Hold-to-place | Click and drag with an item armed (lays a continuous line) |
+| Undo / Redo | `Ctrl+Z` / `Ctrl+Y` (also `Cmd+Z` / `Cmd+Shift+Z`) |
 | Arm / disarm item | Click item in palette |
 | Drag item in | Drag from palette to grid |
 | Select object | Click it |

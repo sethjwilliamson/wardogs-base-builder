@@ -27,9 +27,14 @@
 
   // Interaction bookkeeping
   var pointer = { tileX: 0, tileY: 0, px: 0, py: 0, inside: false };
-  var dragging = null;   // { uid, offX, offY } moving an existing object
+  var dragging = null;   // { uid, offX, offY, snap, startX, startY } moving an existing object
   var panning = null;    // { startX, startY, camX, camY }
+  var placing = null;    // { snap, count, last } active hold-to-place stroke
   var placingGhostRot = 0;
+
+  // Undo / redo history (snapshots of the layout)
+  var history = { undo: [], redo: [] };
+  var HISTORY_MAX = 200;
 
   // ---------------------------------------------------------------- DOM
   var canvas = document.getElementById("canvas");
@@ -57,6 +62,8 @@
     stats: document.getElementById("stats"),
     legend: document.getElementById("legend"),
     fileInput: document.getElementById("fileInput"),
+    undoBtn: document.getElementById("undoBtn"),
+    redoBtn: document.getElementById("redoBtn"),
     rotateBtn: document.getElementById("rotateBtn"),
     deleteBtn: document.getElementById("deleteBtn"),
     dupeBtn: document.getElementById("dupeBtn"),
@@ -461,7 +468,62 @@
     });
   }
 
+  // ---------------------------------------------------------------- History
+  function snapshot() {
+    return {
+      grid: { w: state.grid.w, h: state.grid.h },
+      tileMeters: state.tileMeters,
+      selectedUid: state.selectedUid,
+      objects: state.objects.map(function (o) {
+        return { uid: o.uid, id: o.id, cat: o.cat, x: o.x, y: o.y, rot: o.rot };
+      })
+    };
+  }
+
+  // Record the state BEFORE a mutation so it can be undone.
+  function commit(snap) {
+    history.undo.push(snap);
+    if (history.undo.length > HISTORY_MAX) history.undo.shift();
+    history.redo.length = 0;
+    updateHistoryButtons();
+  }
+
+  function applySnapshot(s) {
+    state.grid = { w: s.grid.w, h: s.grid.h };
+    state.tileMeters = s.tileMeters;
+    state.objects = s.objects.map(function (o) {
+      if (o.uid >= uidSeq) uidSeq = o.uid + 1;
+      return { uid: o.uid, id: o.id, cat: o.cat, x: o.x, y: o.y, rot: o.rot };
+    });
+    var stillExists = state.objects.some(function (o) { return o.uid === s.selectedUid; });
+    state.selectedUid = stillExists ? s.selectedUid : null;
+    els.areaWidth.value = state.grid.w;
+    els.areaHeight.value = state.grid.h;
+    els.tileMeters.value = state.tileMeters;
+    afterChange();
+  }
+
+  function undo() {
+    if (!history.undo.length) return;
+    history.redo.push(snapshot());
+    applySnapshot(history.undo.pop());
+    updateHistoryButtons();
+  }
+
+  function redo() {
+    if (!history.redo.length) return;
+    history.undo.push(snapshot());
+    applySnapshot(history.redo.pop());
+    updateHistoryButtons();
+  }
+
+  function updateHistoryButtons() {
+    if (els.undoBtn) els.undoBtn.disabled = history.undo.length === 0;
+    if (els.redoBtn) els.redoBtn.disabled = history.redo.length === 0;
+  }
+
   // ---------------------------------------------------------------- Actions
+  // Pure mutation: validates and adds an object. History is handled by callers.
   function placeObject(id, x, y, rot) {
     var b = BY_ID[id];
     if (!b) return null;
@@ -476,6 +538,7 @@
   function rotateSelected() {
     var sel = getSelected();
     if (!sel) return;
+    var snap = snapshot();
     var prev = sel.rot;
     sel.rot = (sel.rot + 90) % 360;
     // keep inside bounds after footprint swap
@@ -483,6 +546,9 @@
     sel.x = clamp(sel.x, 0, state.grid.w - f.w);
     sel.y = clamp(sel.y, 0, state.grid.h - f.h);
     if (state.show.collide && hasCollision(sel, sel.uid)) sel.rot = prev; // revert if it now overlaps
+    if (sel.rot !== prev || snap.objects.some(function (o) {
+      return o.uid === sel.uid && (o.x !== sel.x || o.y !== sel.y);
+    })) commit(snap);
     afterChange();
   }
 
@@ -497,6 +563,7 @@
       var ny = clamp(sel.y + spots[i][1], 0, state.grid.h - f.h);
       var candidate = { uid: -1, id: sel.id, cat: sel.cat, x: nx, y: ny, rot: sel.rot };
       if (inBounds(candidate) && !(state.show.collide && hasCollision(candidate, null))) {
+        commit(snapshot());
         candidate.uid = uidSeq++;
         state.objects.push(candidate);
         state.selectedUid = candidate.uid;
@@ -508,6 +575,7 @@
 
   function deleteSelected() {
     if (state.selectedUid == null) return;
+    commit(snapshot());
     state.objects = state.objects.filter(function (o) { return o.uid !== state.selectedUid; });
     state.selectedUid = null;
     afterChange();
@@ -517,6 +585,22 @@
     renderStats();
     renderSelection();
     draw();
+  }
+
+  // Place at the current cursor cell during a hold-to-place stroke.
+  // Skips the cell we last placed on so a stationary hold doesn't retry endlessly.
+  function tryStrokePlace() {
+    if (!placing || !state.tool) return;
+    var b = BY_ID[state.tool];
+    var f = (placingGhostRot === 90 || placingGhostRot === 270) ? { w: b.h, h: b.w } : { w: b.w, h: b.h };
+    var pos = snappedPlacePos(f);
+    if (placing.last && placing.last.x === pos.x && placing.last.y === pos.y &&
+        placing.last.rot === placingGhostRot) return;
+    var placed = placeObject(state.tool, pos.x, pos.y, placingGhostRot);
+    if (placed) {
+      placing.count++;
+      placing.last = { x: pos.x, y: pos.y, rot: placingGhostRot };
+    }
   }
 
   // ---------------------------------------------------------------- Pointer events
@@ -532,6 +616,12 @@
 
   canvas.addEventListener("mousemove", function (e) {
     updatePointer(e);
+
+    if (placing) {
+      tryStrokePlace();
+      draw();
+      return;
+    }
 
     if (panning) {
       camera.x = panning.camX - (e.clientX - panning.startX) / camera.scale;
@@ -568,16 +658,11 @@
       return;
     }
 
-    // placing mode
+    // placing mode: start a hold-to-place stroke (one undo step for the whole stroke)
     if (state.tool) {
-      var b = BY_ID[state.tool];
-      var f = (placingGhostRot === 90 || placingGhostRot === 270) ? { w: b.h, h: b.w } : { w: b.w, h: b.h };
-      var pos = snappedPlacePos(f);
-      var placed = placeObject(state.tool, pos.x, pos.y, placingGhostRot);
-      if (placed && !e.shiftKey) {
-        // one-shot unless shift held for rapid multi-place
-        // keep tool armed for continuous building (common in base builders)
-      }
+      placing = { snap: snapshot(), count: 0, last: null };
+      tryStrokePlace();
+      draw();
       return;
     }
 
@@ -585,7 +670,8 @@
     var hit = findObjectAt(Math.floor(pointer.tileX), Math.floor(pointer.tileY));
     if (hit) {
       state.selectedUid = hit.uid;
-      dragging = { uid: hit.uid, offX: pointer.tileX - hit.x, offY: pointer.tileY - hit.y };
+      dragging = { uid: hit.uid, offX: pointer.tileX - hit.x, offY: pointer.tileY - hit.y,
+                   snap: snapshot(), startX: hit.x, startY: hit.y };
       renderSelection();
       draw();
     } else {
@@ -598,8 +684,15 @@
   });
 
   window.addEventListener("mouseup", function () {
+    if (placing) {
+      if (placing.count > 0) commit(placing.snap);
+      placing = null;
+    }
     if (dragging) {
-      // if final position collides, nudge back is complex; we simply flag via redraw.
+      var obj = getSelected();
+      if (obj && (obj.x !== dragging.startX || obj.y !== dragging.startY)) {
+        commit(dragging.snap);
+      }
       dragging = null;
       afterChange();
     }
@@ -642,14 +735,22 @@
     var b = BY_ID[id];
     var f = { w: b.w, h: b.h };
     var pos = snappedPlacePos(f);
+    var snap = snapshot();
     var placed = placeObject(id, pos.x, pos.y, 0);
-    if (placed) { state.selectedUid = placed.uid; afterChange(); }
+    if (placed) { commit(snap); state.selectedUid = placed.uid; afterChange(); }
   });
 
   // ---------------------------------------------------------------- Keyboard
   window.addEventListener("keydown", function (e) {
     var tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
+
+    // Undo / redo (Ctrl+Z / Ctrl+Y, or Cmd+Z / Cmd+Shift+Z / Cmd+Y on macOS)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      var k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) { undo(); e.preventDefault(); return; }
+      if (k === "y" || (k === "z" && e.shiftKey)) { redo(); e.preventDefault(); return; }
+    }
 
     switch (e.key) {
       case "r": case "R":
@@ -689,9 +790,11 @@
     e.preventDefault();
     var f = footprint(sel);
     var px = sel.x, py = sel.y;
+    var snap = snapshot();
     sel.x = clamp(sel.x + dx, 0, state.grid.w - f.w);
     sel.y = clamp(sel.y + dy, 0, state.grid.h - f.h);
     if (state.show.collide && hasCollision(sel, sel.uid)) { sel.x = px; sel.y = py; }
+    if (sel.x !== px || sel.y !== py) commit(snap);
     afterChange();
   });
 
@@ -710,6 +813,8 @@
     var w = clamp(parseInt(els.areaWidth.value, 10) || 60, 8, 400);
     var h = clamp(parseInt(els.areaHeight.value, 10) || 40, 8, 400);
     var m = clamp(parseFloat(els.tileMeters.value) || 1, 0.25, 10);
+    if (w === state.grid.w && h === state.grid.h && m === state.tileMeters) return;
+    commit(snapshot());
     state.grid.w = w; state.grid.h = h; state.tileMeters = m;
     els.areaWidth.value = w; els.areaHeight.value = h; els.tileMeters.value = m;
     // drop objects now out of bounds
@@ -720,6 +825,8 @@
   });
 
   // ---------------------------------------------------------------- Toolbar buttons
+  if (els.undoBtn) els.undoBtn.addEventListener("click", undo);
+  if (els.redoBtn) els.redoBtn.addEventListener("click", redo);
   els.rotateBtn.addEventListener("click", rotateSelected);
   els.deleteBtn.addEventListener("click", deleteSelected);
   els.dupeBtn.addEventListener("click", duplicateSelected);
@@ -743,8 +850,9 @@
     };
   }
 
-  function loadData(data) {
+  function loadData(data, record) {
     if (!data || !data.grid) return false;
+    if (record) commit(snapshot());
     state.grid = { w: data.grid.w, h: data.grid.h };
     state.tileMeters = data.tileMeters || 1;
     state.objects = [];
@@ -772,7 +880,7 @@
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) { flash(els.loadBtn, "Empty"); return; }
-      loadData(JSON.parse(raw));
+      loadData(JSON.parse(raw), true);
       flash(els.loadBtn, "Loaded");
     } catch (err) { alert("Could not load: " + err.message); }
   });
@@ -793,7 +901,7 @@
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function () {
-      try { loadData(JSON.parse(reader.result)); }
+      try { loadData(JSON.parse(reader.result), true); }
       catch (err) { alert("Invalid file: " + err.message); }
     };
     reader.readAsText(file);
@@ -801,7 +909,9 @@
   });
 
   els.clearBtn.addEventListener("click", function () {
-    if (!state.objects.length || confirm("Remove all placed objects?")) {
+    if (!state.objects.length) return;
+    if (confirm("Remove all placed objects?")) {
+      commit(snapshot());
       state.objects = [];
       state.selectedUid = null;
       afterChange();
@@ -825,13 +935,14 @@
     renderLegend();
     renderStats();
     renderSelection();
+    updateHistoryButtons();
     resize();
     centerView();
 
-    // try to restore last session silently
+    // try to restore last session silently (not recorded in history)
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) loadData(JSON.parse(raw));
+      if (raw) loadData(JSON.parse(raw), false);
     } catch (e) { /* ignore */ }
   }
 
