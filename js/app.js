@@ -17,8 +17,9 @@
     grid: { w: 60, h: 40 },   // in tiles
     tileMeters: window.WARDOGS.TILE_METERS || 1.5,  // WARDOGS build grid is 1.5 m
     objects: [],              // { uid, id, x, y, rot }  (x,y = top-left tile, rot in {0,90,180,270})
-    selectedUid: null,
+    selection: [],            // uids of currently selected objects
     tool: null,               // buildable id currently armed for placing
+    measureMode: false,       // tape-measure tool active
     show: { grid: true, snap: true, collide: true }
   };
 
@@ -27,9 +28,12 @@
 
   // Interaction bookkeeping
   var pointer = { tileX: 0, tileY: 0, px: 0, py: 0, inside: false };
-  var dragging = null;   // { uid, offX, offY, snap, startX, startY } moving an existing object
+  var dragging = null;   // { snap, moved, starts:[{uid,x,y}], anchorX, anchorY } moving selection
   var panning = null;    // { startX, startY, camX, camY }
   var placing = null;    // { snap, count, last } active hold-to-place stroke
+  var marquee = null;    // { x0, y0, x1, y1 } rectangle-select in tile coords
+  var measuring = null;  // { x0, y0, x1, y1 } tape-measure line in tile coords (persists after release)
+  var clipboard = null;  // [{ id, dx, dy, rot }] normalized copied objects
   var placingGhostRot = 0;
 
   // Undo / redo history (snapshots of the layout)
@@ -64,6 +68,7 @@
     fileInput: document.getElementById("fileInput"),
     undoBtn: document.getElementById("undoBtn"),
     redoBtn: document.getElementById("redoBtn"),
+    measureBtn: document.getElementById("measureBtn"),
     rotateBtn: document.getElementById("rotateBtn"),
     deleteBtn: document.getElementById("deleteBtn"),
     dupeBtn: document.getElementById("dupeBtn"),
@@ -124,12 +129,35 @@
     return null;
   }
 
+  function isSelected(uid) { return state.selection.indexOf(uid) !== -1; }
+
+  function getSelectedObjects() {
+    return state.objects.filter(function (o) { return isSelected(o.uid); });
+  }
+
+  // The single selected object, or null if 0 or >1 are selected.
   function getSelected() {
-    if (state.selectedUid == null) return null;
+    if (state.selection.length !== 1) return null;
+    return objByUid(state.selection[0]);
+  }
+
+  function objByUid(uid) {
     for (var i = 0; i < state.objects.length; i++)
-      if (state.objects[i].uid === state.selectedUid) return state.objects[i];
+      if (state.objects[i].uid === uid) return state.objects[i];
     return null;
   }
+
+  function setSelection(uids) {
+    // keep only uids that still exist, de-duplicated
+    var seen = {};
+    state.selection = uids.filter(function (u) {
+      if (seen[u] || !objByUid(u)) return false;
+      seen[u] = true;
+      return true;
+    });
+  }
+
+  function clearSelection() { state.selection = []; }
 
   // ---------------------------------------------------------------- Canvas sizing
   function resize() {
@@ -182,11 +210,17 @@
 
     // objects
     for (var i = 0; i < state.objects.length; i++) {
-      drawObject(state.objects[i], state.objects[i].uid === state.selectedUid);
+      drawObject(state.objects[i], isSelected(state.objects[i].uid));
     }
 
     // placement ghost
-    if (state.tool && pointer.inside && !dragging) drawGhost();
+    if (state.tool && !state.measureMode && pointer.inside && !dragging && !marquee) drawGhost();
+
+    // marquee rectangle
+    if (marquee) drawMarquee();
+
+    // tape measure
+    if (measuring) drawMeasure();
 
     updateHud();
   }
@@ -293,6 +327,67 @@
     drawNotch(p.x, p.y, w, h, placingGhostRot);
   }
 
+  function drawMarquee() {
+    var a = worldToScreen(Math.min(marquee.x0, marquee.x1), Math.min(marquee.y0, marquee.y1));
+    var bpt = worldToScreen(Math.max(marquee.x0, marquee.x1), Math.max(marquee.y0, marquee.y1));
+    ctx.fillStyle = "rgba(78,161,255,0.15)";
+    ctx.fillRect(a.x, a.y, bpt.x - a.x, bpt.y - a.y);
+    ctx.strokeStyle = "#4ea1ff";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(a.x, a.y, bpt.x - a.x, bpt.y - a.y);
+    ctx.setLineDash([]);
+  }
+
+  function drawMeasure() {
+    var a = worldToScreen(measuring.x0, measuring.y0);
+    var bpt = worldToScreen(measuring.x1, measuring.y1);
+    var dxT = measuring.x1 - measuring.x0;
+    var dyT = measuring.y1 - measuring.y0;
+    var distT = Math.sqrt(dxT * dxT + dyT * dyT);
+    var m = state.tileMeters;
+
+    // line
+    ctx.strokeStyle = "#ffd166";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(bpt.x, bpt.y);
+    ctx.stroke();
+
+    // endpoints
+    ctx.fillStyle = "#ffd166";
+    [a, bpt].forEach(function (pt) {
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // label
+    var lines = [
+      distT.toFixed(2) + " tiles  ·  " + (distT * m).toFixed(2) + " m",
+      "Δ " + Math.abs(dxT).toFixed(1) + " × " + Math.abs(dyT).toFixed(1) + " tiles" +
+        "  (" + (Math.abs(dxT) * m).toFixed(1) + " × " + (Math.abs(dyT) * m).toFixed(1) + " m)"
+    ];
+    ctx.font = "600 12px system-ui, sans-serif";
+    var tw = 0;
+    lines.forEach(function (t) { tw = Math.max(tw, ctx.measureText(t).width); });
+    var lx = (a.x + bpt.x) / 2, ly = (a.y + bpt.y) / 2;
+    var boxW = tw + 14, boxH = 34;
+    var bx = clamp(lx - boxW / 2, 2, viewSize().w - boxW - 2);
+    var by = clamp(ly - boxH - 10, 2, viewSize().h - boxH - 2);
+    ctx.fillStyle = "rgba(10,13,17,0.88)";
+    ctx.strokeStyle = "rgba(255,209,102,0.5)";
+    ctx.lineWidth = 1;
+    roundRect(bx, by, boxW, boxH, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffe4a3";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(lines[0], bx + 7, by + 11);
+    ctx.fillStyle = "#c9b48a";
+    ctx.fillText(lines[1], bx + 7, by + 24);
+  }
+
   // Where a ghost/new object would land, centered under the cursor, snapped + clamped.
   function snappedPlacePos(f) {
     var wx = pointer.tileX - f.w / 2;
@@ -327,10 +422,16 @@
       ? "x " + Math.floor(pointer.tileX) + "  y " + Math.floor(pointer.tileY)
       : "–";
     els.zoomReadout.textContent = Math.round((camera.scale / 24) * 100) + "%";
-    if (state.tool) {
+    if (state.measureMode) {
+      els.ghostName.style.display = "block";
+      els.ghostName.textContent = "Measure: drag to measure  (Esc to exit)";
+    } else if (state.tool) {
       var b = BY_ID[state.tool];
       els.ghostName.style.display = "block";
       els.ghostName.textContent = "Placing: " + b.name + "  (R to rotate)";
+    } else if (state.selection.length > 1) {
+      els.ghostName.style.display = "block";
+      els.ghostName.textContent = state.selection.length + " selected  (drag to move · Ctrl+C to copy)";
     } else {
       els.ghostName.style.display = "none";
     }
@@ -361,30 +462,52 @@
   }
 
   function renderSelection() {
-    var sel = getSelected();
-    if (!sel) {
+    var n = state.selection.length;
+    if (n === 0) {
       els.selectionInfo.className = "selection-info muted";
       els.selectionInfo.textContent = "Nothing selected.";
       syncToolbar();
       return;
     }
-    var b = BY_ID[sel.id];
-    var f = footprint(sel);
-    els.selectionInfo.className = "selection-info";
-    els.selectionInfo.innerHTML =
-      row("Name", b.name) +
-      row("Category", b.cat) +
-      row("Footprint", f.w + " × " + f.h + " tiles") +
-      row("Real size", (b.mW || b.w) + " × " + (b.mD || b.h) + " m") +
-      (b.cost != null ? row("Build cost", b.cost + " supply") : "") +
-      (b.hp != null ? row("Health", b.hp.toLocaleString() + " HP") : "") +
-      row("Position", "x " + sel.x + ", y " + sel.y) +
-      row("Rotation", sel.rot + "°") +
+
+    var actions =
       '<div class="sel-actions">' +
         '<button class="btn ghost" data-act="rotate">Rotate</button>' +
         '<button class="btn ghost" data-act="dupe">Duplicate</button>' +
         '<button class="btn danger" data-act="delete">Delete</button>' +
       '</div>';
+
+    if (n === 1) {
+      var sel = getSelected();
+      var b = BY_ID[sel.id];
+      var f = footprint(sel);
+      els.selectionInfo.className = "selection-info";
+      els.selectionInfo.innerHTML =
+        row("Name", b.name) +
+        row("Category", b.cat) +
+        row("Footprint", f.w + " × " + f.h + " tiles") +
+        row("Real size", (b.mW || b.w) + " × " + (b.mD || b.h) + " m") +
+        (b.cost != null ? row("Build cost", b.cost + " supply") : "") +
+        (b.hp != null ? row("Health", b.hp.toLocaleString() + " HP") : "") +
+        row("Position", "x " + sel.x + ", y " + sel.y) +
+        row("Rotation", sel.rot + "°") +
+        actions;
+    } else {
+      // group summary
+      var objs = getSelectedObjects();
+      var tiles = 0, cost = 0;
+      objs.forEach(function (o) {
+        var ff = footprint(o); tiles += ff.w * ff.h;
+        var bb = BY_ID[o.id]; if (bb && bb.cost != null) cost += bb.cost;
+      });
+      els.selectionInfo.className = "selection-info";
+      els.selectionInfo.innerHTML =
+        row("Selected", n + " objects") +
+        row("Tiles", String(tiles)) +
+        row("Total cost", cost.toLocaleString() + " supply") +
+        actions;
+    }
+
     els.selectionInfo.querySelectorAll("[data-act]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var a = btn.getAttribute("data-act");
@@ -400,10 +523,11 @@
   }
 
   function syncToolbar() {
-    var has = !!getSelected();
+    var has = state.selection.length > 0;
     els.rotateBtn.disabled = !has;
     els.deleteBtn.disabled = !has;
     els.dupeBtn.disabled = !has;
+    if (els.measureBtn) els.measureBtn.setAttribute("aria-pressed", String(state.measureMode));
   }
 
   function renderLegend() {
@@ -456,7 +580,8 @@
   function armTool(id) {
     state.tool = (state.tool === id) ? null : id;
     placingGhostRot = 0;
-    state.selectedUid = null;
+    state.measureMode = false;
+    clearSelection();
     highlightActiveTool();
     renderSelection();
     draw();
@@ -473,7 +598,7 @@
     return {
       grid: { w: state.grid.w, h: state.grid.h },
       tileMeters: state.tileMeters,
-      selectedUid: state.selectedUid,
+      selection: state.selection.slice(),
       objects: state.objects.map(function (o) {
         return { uid: o.uid, id: o.id, cat: o.cat, x: o.x, y: o.y, rot: o.rot };
       })
@@ -495,8 +620,7 @@
       if (o.uid >= uidSeq) uidSeq = o.uid + 1;
       return { uid: o.uid, id: o.id, cat: o.cat, x: o.x, y: o.y, rot: o.rot };
     });
-    var stillExists = state.objects.some(function (o) { return o.uid === s.selectedUid; });
-    state.selectedUid = stillExists ? s.selectedUid : null;
+    setSelection(s.selection || []);
     els.areaWidth.value = state.grid.w;
     els.areaHeight.value = state.grid.h;
     els.tileMeters.value = state.tileMeters;
@@ -535,49 +659,101 @@
     return obj;
   }
 
+  // Rotate every selected object 90° in place (each around its own footprint).
   function rotateSelected() {
-    var sel = getSelected();
-    if (!sel) return;
+    var objs = getSelectedObjects();
+    if (!objs.length) return;
     var snap = snapshot();
-    var prev = sel.rot;
-    sel.rot = (sel.rot + 90) % 360;
-    // keep inside bounds after footprint swap
-    var f = footprint(sel);
-    sel.x = clamp(sel.x, 0, state.grid.w - f.w);
-    sel.y = clamp(sel.y, 0, state.grid.h - f.h);
-    if (state.show.collide && hasCollision(sel, sel.uid)) sel.rot = prev; // revert if it now overlaps
-    if (sel.rot !== prev || snap.objects.some(function (o) {
-      return o.uid === sel.uid && (o.x !== sel.x || o.y !== sel.y);
-    })) commit(snap);
+    var changed = false;
+    objs.forEach(function (sel) {
+      var prev = sel.rot, px = sel.x, py = sel.y;
+      sel.rot = (sel.rot + 90) % 360;
+      var f = footprint(sel);
+      sel.x = clamp(sel.x, 0, state.grid.w - f.w);
+      sel.y = clamp(sel.y, 0, state.grid.h - f.h);
+      // revert this one if it now overlaps a non-selected object
+      if (state.show.collide && collidesWithUnselected(sel)) { sel.rot = prev; sel.x = px; sel.y = py; }
+      else if (sel.rot !== prev || sel.x !== px || sel.y !== py) changed = true;
+    });
+    if (changed) commit(snap);
     afterChange();
   }
 
-  function duplicateSelected() {
-    var sel = getSelected();
-    if (!sel) return;
-    var f = footprint(sel);
-    // try to place a copy just to the right, else search nearby
-    var spots = [[f.w, 0], [0, f.h], [-f.w, 0], [0, -f.h], [f.w, f.h]];
-    for (var i = 0; i < spots.length; i++) {
-      var nx = clamp(sel.x + spots[i][0], 0, state.grid.w - f.w);
-      var ny = clamp(sel.y + spots[i][1], 0, state.grid.h - f.h);
-      var candidate = { uid: -1, id: sel.id, cat: sel.cat, x: nx, y: ny, rot: sel.rot };
-      if (inBounds(candidate) && !(state.show.collide && hasCollision(candidate, null))) {
-        commit(snapshot());
-        candidate.uid = uidSeq++;
-        state.objects.push(candidate);
-        state.selectedUid = candidate.uid;
-        afterChange();
-        return;
-      }
+  // Collision test against everything that is NOT part of the current selection.
+  function collidesWithUnselected(obj) {
+    var r = objRect(obj);
+    for (var i = 0; i < state.objects.length; i++) {
+      var o = state.objects[i];
+      if (o.uid === obj.uid || isSelected(o.uid)) continue;
+      if (rectsOverlap(r, objRect(o))) return true;
     }
+    return false;
+  }
+
+  // Normalize the selection to an anchor-relative list (for copy / duplicate).
+  function selectionToClipboard() {
+    var objs = getSelectedObjects();
+    if (!objs.length) return null;
+    var minX = Infinity, minY = Infinity;
+    objs.forEach(function (o) { minX = Math.min(minX, o.x); minY = Math.min(minY, o.y); });
+    return objs.map(function (o) {
+      return { id: o.id, dx: o.x - minX, dy: o.y - minY, rot: o.rot };
+    });
+  }
+
+  // Stamp a clipboard list with its anchor at (ax, ay); selects the new copies.
+  function stampClipboard(list, ax, ay) {
+    if (!list || !list.length) return;
+    // clamp so the whole group stays in bounds
+    var maxDX = 0, maxDY = 0;
+    list.forEach(function (c) {
+      var b = BY_ID[c.id]; if (!b) return;
+      var f = (c.rot === 90 || c.rot === 270) ? { w: b.h, h: b.w } : { w: b.w, h: b.h };
+      maxDX = Math.max(maxDX, c.dx + f.w);
+      maxDY = Math.max(maxDY, c.dy + f.h);
+    });
+    ax = clamp(ax, 0, state.grid.w - maxDX);
+    ay = clamp(ay, 0, state.grid.h - maxDY);
+    commit(snapshot());
+    var newUids = [];
+    list.forEach(function (c) {
+      var b = BY_ID[c.id]; if (!b) return;
+      var obj = { uid: uidSeq++, id: c.id, cat: b.cat, x: ax + c.dx, y: ay + c.dy, rot: c.rot };
+      state.objects.push(obj);
+      newUids.push(obj.uid);
+    });
+    setSelection(newUids);
+    afterChange();
+  }
+
+  // Duplicate selection in place, offset a couple of tiles down-right.
+  function duplicateSelected() {
+    var list = selectionToClipboard();
+    if (!list) return;
+    var objs = getSelectedObjects();
+    var minX = Infinity, minY = Infinity;
+    objs.forEach(function (o) { minX = Math.min(minX, o.x); minY = Math.min(minY, o.y); });
+    stampClipboard(list, minX + 2, minY + 2);
+  }
+
+  function copySelection() {
+    var list = selectionToClipboard();
+    if (list) clipboard = list;
+  }
+
+  function pasteClipboard() {
+    if (!clipboard) return;
+    // anchor at the cursor if inside, else offset from origin
+    var ax = pointer.inside ? Math.round(pointer.tileX) : 2;
+    var ay = pointer.inside ? Math.round(pointer.tileY) : 2;
+    stampClipboard(clipboard, ax, ay);
   }
 
   function deleteSelected() {
-    if (state.selectedUid == null) return;
+    if (!state.selection.length) return;
     commit(snapshot());
-    state.objects = state.objects.filter(function (o) { return o.uid !== state.selectedUid; });
-    state.selectedUid = null;
+    state.objects = state.objects.filter(function (o) { return !isSelected(o.uid); });
+    clearSelection();
     afterChange();
   }
 
@@ -617,6 +793,20 @@
   canvas.addEventListener("mousemove", function (e) {
     updatePointer(e);
 
+    if (measuring && measuring.active) {
+      measuring.x1 = pointer.tileX;
+      measuring.y1 = pointer.tileY;
+      draw();
+      return;
+    }
+
+    if (marquee) {
+      marquee.x1 = pointer.tileX;
+      marquee.y1 = pointer.tileY;
+      draw();
+      return;
+    }
+
     if (placing) {
       tryStrokePlace();
       draw();
@@ -631,30 +821,61 @@
     }
 
     if (dragging) {
-      var obj = getSelected();
-      if (obj) {
-        var f = footprint(obj);
-        var nx = pointer.tileX - dragging.offX;
-        var ny = pointer.tileY - dragging.offY;
-        if (state.show.snap) { nx = Math.round(nx); ny = Math.round(ny); }
-        nx = clamp(nx, 0, state.grid.w - f.w);
-        ny = clamp(ny, 0, state.grid.h - f.h);
-        obj.x = nx; obj.y = ny;
-        draw();
-      }
+      moveSelectionTo(pointer.tileX, pointer.tileY);
+      draw();
       return;
     }
 
     draw();
   });
 
+  // Move the whole selection so the grabbed object's corner follows the cursor.
+  function moveSelectionTo(tileX, tileY) {
+    var anchor = objByUid(dragging.anchorUid);
+    if (!anchor) return;
+    var af = footprint(anchor);
+    var nx = tileX - dragging.offX;
+    var ny = tileY - dragging.offY;
+    if (state.show.snap) { nx = Math.round(nx); ny = Math.round(ny); }
+    // desired delta from the anchor's ORIGINAL position
+    var dx = nx - dragging.anchorStartX;
+    var dy = ny - dragging.anchorStartY;
+    // clamp delta so every selected object stays in bounds
+    dragging.starts.forEach(function (s) {
+      var b = BY_ID[s.id];
+      var f = (s.rot === 90 || s.rot === 270) ? { w: b.h, h: b.w } : { w: b.w, h: b.h };
+      dx = clamp(dx, -s.x, state.grid.w - f.w - s.x);
+      dy = clamp(dy, -s.y, state.grid.h - f.h - s.y);
+    });
+    dragging.starts.forEach(function (s) {
+      var o = objByUid(s.uid);
+      if (o) { o.x = s.x + dx; o.y = s.y + dy; }
+    });
+    if (dx !== 0 || dy !== 0) dragging.moved = true;
+  }
+
   canvas.addEventListener("mousedown", function (e) {
     updatePointer(e);
 
-    // middle button or space-less right button => pan; also pan with left on empty when no tool
+    // middle button or right button => pan
     if (e.button === 1 || e.button === 2) {
       panning = { startX: e.clientX, startY: e.clientY, camX: camera.x, camY: camera.y };
       e.preventDefault();
+      return;
+    }
+
+    // tape-measure mode: start a fresh measurement
+    if (state.measureMode) {
+      measuring = { x0: pointer.tileX, y0: pointer.tileY, x1: pointer.tileX, y1: pointer.tileY, active: true };
+      draw();
+      return;
+    }
+
+    // shift+drag => rectangle (marquee) selection (disarms any placement tool)
+    if (e.shiftKey) {
+      if (state.tool) { state.tool = null; highlightActiveTool(); }
+      marquee = { x0: pointer.tileX, y0: pointer.tileY, x1: pointer.tileX, y1: pointer.tileY };
+      draw();
       return;
     }
 
@@ -666,38 +887,83 @@
       return;
     }
 
-    // select / start moving existing object
+    // select / start moving existing object(s)
     var hit = findObjectAt(Math.floor(pointer.tileX), Math.floor(pointer.tileY));
     if (hit) {
-      state.selectedUid = hit.uid;
-      dragging = { uid: hit.uid, offX: pointer.tileX - hit.x, offY: pointer.tileY - hit.y,
-                   snap: snapshot(), startX: hit.x, startY: hit.y };
+      // clicking an unselected object selects just it; clicking one already in a
+      // multi-selection keeps the group so it can be dragged together
+      if (!isSelected(hit.uid)) setSelection([hit.uid]);
+      startDrag(hit);
       renderSelection();
       draw();
     } else {
-      // empty click: deselect, or start panning with left-drag
-      state.selectedUid = null;
+      // empty click: deselect and start panning with left-drag
+      clearSelection();
       panning = { startX: e.clientX, startY: e.clientY, camX: camera.x, camY: camera.y };
       renderSelection();
       draw();
     }
   });
 
+  function startDrag(anchor) {
+    var starts = getSelectedObjects().map(function (o) {
+      return { uid: o.uid, id: o.id, x: o.x, y: o.y, rot: o.rot };
+    });
+    dragging = {
+      snap: snapshot(),
+      moved: false,
+      starts: starts,
+      anchorUid: anchor.uid,
+      anchorStartX: anchor.x,
+      anchorStartY: anchor.y,
+      offX: pointer.tileX - anchor.x,
+      offY: pointer.tileY - anchor.y
+    };
+  }
+
   window.addEventListener("mouseup", function () {
+    if (measuring && measuring.active) {
+      measuring.active = false;
+      // a click with no drag clears the measurement instead of leaving a dot
+      var d = Math.hypot(measuring.x1 - measuring.x0, measuring.y1 - measuring.y0);
+      if (d < 0.05) measuring = null;
+      draw();
+      return;
+    }
+    if (marquee) {
+      applyMarquee();
+      marquee = null;
+      renderSelection();
+      draw();
+      return;
+    }
     if (placing) {
       if (placing.count > 0) commit(placing.snap);
       placing = null;
     }
     if (dragging) {
-      var obj = getSelected();
-      if (obj && (obj.x !== dragging.startX || obj.y !== dragging.startY)) {
-        commit(dragging.snap);
-      }
+      if (dragging.moved) commit(dragging.snap);
       dragging = null;
       afterChange();
     }
     panning = null;
   });
+
+  // Select every object whose footprint intersects the marquee rectangle.
+  function applyMarquee() {
+    var r = {
+      x: Math.min(marquee.x0, marquee.x1),
+      y: Math.min(marquee.y0, marquee.y1),
+      w: Math.abs(marquee.x1 - marquee.x0),
+      h: Math.abs(marquee.y1 - marquee.y0)
+    };
+    if (r.w < 0.05 && r.h < 0.05) { clearSelection(); return; } // shift-click with no drag
+    var uids = [];
+    state.objects.forEach(function (o) {
+      if (rectsOverlap(r, objRect(o))) uids.push(o.uid);
+    });
+    setSelection(uids);
+  }
 
   canvas.addEventListener("mouseleave", function () {
     pointer.inside = false;
@@ -737,7 +1003,7 @@
     var pos = snappedPlacePos(f);
     var snap = snapshot();
     var placed = placeObject(id, pos.x, pos.y, 0);
-    if (placed) { commit(snap); state.selectedUid = placed.uid; afterChange(); }
+    if (placed) { commit(snap); setSelection([placed.uid]); afterChange(); }
   });
 
   // ---------------------------------------------------------------- Keyboard
@@ -745,11 +1011,15 @@
     var tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
 
-    // Undo / redo (Ctrl+Z / Ctrl+Y, or Cmd+Z / Cmd+Shift+Z / Cmd+Y on macOS)
+    // Undo / redo / copy / paste / select-all (Ctrl or Cmd)
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       var k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) { undo(); e.preventDefault(); return; }
       if (k === "y" || (k === "z" && e.shiftKey)) { redo(); e.preventDefault(); return; }
+      if (k === "c") { copySelection(); e.preventDefault(); return; }
+      if (k === "x") { copySelection(); deleteSelected(); e.preventDefault(); return; }
+      if (k === "v") { pasteClipboard(); e.preventDefault(); return; }
+      if (k === "a") { setSelection(state.objects.map(function (o) { return o.uid; })); renderSelection(); draw(); e.preventDefault(); return; }
     }
 
     switch (e.key) {
@@ -757,12 +1027,14 @@
         if (state.tool) { placingGhostRot = (placingGhostRot + 90) % 360; draw(); }
         else rotateSelected();
         break;
+      case "m": case "M":
+        toggleMeasure(); break;
       case "Delete": case "Backspace":
         deleteSelected(); e.preventDefault(); break;
       case "d": case "D":
         duplicateSelected(); break;
       case "Escape":
-        state.tool = null; state.selectedUid = null;
+        state.tool = null; state.measureMode = false; measuring = null; clearSelection();
         highlightActiveTool(); renderSelection(); draw(); break;
       case "+": case "=":
         camera.scale = clamp(camera.scale * 1.12, 4, 120); draw(); break;
@@ -775,10 +1047,10 @@
     }
   });
 
-  // arrow-nudge selected object
+  // arrow-nudge the whole selection together
   window.addEventListener("keydown", function (e) {
-    var sel = getSelected();
-    if (!sel) return;
+    var objs = getSelectedObjects();
+    if (!objs.length) return;
     var tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     var dx = 0, dy = 0;
@@ -788,13 +1060,16 @@
     else if (e.key === "ArrowDown") dy = 1;
     else return;
     e.preventDefault();
-    var f = footprint(sel);
-    var px = sel.x, py = sel.y;
+    // clamp the shared delta so every object stays in bounds
+    objs.forEach(function (o) {
+      var f = footprint(o);
+      dx = clamp(dx, -o.x, state.grid.w - f.w - o.x);
+      dy = clamp(dy, -o.y, state.grid.h - f.h - o.y);
+    });
+    if (dx === 0 && dy === 0) { afterChange(); return; }
     var snap = snapshot();
-    sel.x = clamp(sel.x + dx, 0, state.grid.w - f.w);
-    sel.y = clamp(sel.y + dy, 0, state.grid.h - f.h);
-    if (state.show.collide && hasCollision(sel, sel.uid)) { sel.x = px; sel.y = py; }
-    if (sel.x !== px || sel.y !== py) commit(snap);
+    objs.forEach(function (o) { o.x += dx; o.y += dy; });
+    commit(snap);
     afterChange();
   });
 
@@ -819,14 +1094,27 @@
     els.areaWidth.value = w; els.areaHeight.value = h; els.tileMeters.value = m;
     // drop objects now out of bounds
     state.objects = state.objects.filter(inBounds);
-    if (!getSelected()) state.selectedUid = null;
+    setSelection(state.selection);
     centerView();
     afterChange();
   });
 
+  function toggleMeasure() {
+    state.measureMode = !state.measureMode;
+    if (state.measureMode) {
+      state.tool = null; highlightActiveTool();
+      clearSelection();
+    } else {
+      measuring = null;
+    }
+    renderSelection();
+    draw();
+  }
+
   // ---------------------------------------------------------------- Toolbar buttons
   if (els.undoBtn) els.undoBtn.addEventListener("click", undo);
   if (els.redoBtn) els.redoBtn.addEventListener("click", redo);
+  if (els.measureBtn) els.measureBtn.addEventListener("click", toggleMeasure);
   els.rotateBtn.addEventListener("click", rotateSelected);
   els.deleteBtn.addEventListener("click", deleteSelected);
   els.dupeBtn.addEventListener("click", duplicateSelected);
@@ -834,7 +1122,7 @@
   els.zoomOut.addEventListener("click", function () { camera.scale = clamp(camera.scale / 1.12, 4, 120); draw(); });
   els.zoomReset.addEventListener("click", centerView);
   els.cancelTool.addEventListener("click", function () {
-    state.tool = null; state.selectedUid = null;
+    state.tool = null; state.measureMode = false; measuring = null; clearSelection();
     highlightActiveTool(); renderSelection(); draw();
   });
 
@@ -860,7 +1148,7 @@
       if (!BY_ID[o.id]) return;
       state.objects.push({ uid: uidSeq++, id: o.id, cat: BY_ID[o.id].cat, x: o.x, y: o.y, rot: o.rot || 0 });
     });
-    state.selectedUid = null;
+    clearSelection();
     els.areaWidth.value = state.grid.w;
     els.areaHeight.value = state.grid.h;
     els.tileMeters.value = state.tileMeters;
@@ -913,7 +1201,7 @@
     if (confirm("Remove all placed objects?")) {
       commit(snapshot());
       state.objects = [];
-      state.selectedUid = null;
+      clearSelection();
       afterChange();
     }
   });

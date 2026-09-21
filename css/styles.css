@@ -242,6 +242,7 @@ html, body {
 }
 .tool:hover { background: #232c38; }
 .tool:disabled { opacity: 0.35; cursor: default; }
+.tool[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: rgba(255,122,41,0.12); }
 
 /* ---------- Inspector ---------- */
 .inspector {

@@ -22,6 +22,10 @@ Just open `index.html` in any modern browser (double-click it).
     armed so you can place many in a row.
 - **Select & edit** placed objects — move by dragging, nudge with arrow keys,
   rotate, duplicate, delete.
+- **Rectangle (marquee) selection** — Shift-drag a box to select many objects,
+  then move, rotate, copy/paste or delete them **together** as a group.
+- **Tape measure** — the 📏 tool measures any distance in both tiles and metres,
+  with the horizontal/vertical span.
 - **Grid snapping** and **collision detection** (both toggleable). Invalid
   placements are shown in red and blocked.
 - **Pan & zoom** — mouse wheel to zoom toward the cursor, drag empty space or
@@ -40,8 +44,12 @@ Just open `index.html` in any modern browser (double-click it).
 | Arm / disarm item | Click item in palette |
 | Drag item in | Drag from palette to grid |
 | Select object | Click it |
-| Move object | Drag it, or arrow keys |
-| Rotate | `R`, or toolbar / inspector button |
+| Rectangle-select | **Shift + drag** a box; everything it touches is selected |
+| Select all | `Ctrl+A` |
+| Move selection | Drag any selected object, or arrow keys (moves the whole group) |
+| Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` (pastes at the cursor) |
+| Tape measure | Click 📏 (or `M`), then drag — shows distance in tiles and metres |
+| Rotate | `R`, or toolbar / inspector button (rotates each selected item) |
 | Duplicate | `D` |
 | Delete | `Delete` / `Backspace` |
 | Zoom | Mouse wheel, `+` / `-` |
