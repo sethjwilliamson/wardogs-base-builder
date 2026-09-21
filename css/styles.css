@@ -28,6 +28,14 @@ html, body {
   overflow: hidden;
 }
 
+/* Fill the viewport as a column: fixed-height top bar + flexible layout.
+   Using flex (not a hardcoded top-bar height) keeps the stage sized correctly
+   even when the top bar wraps to multiple rows on narrow windows. */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ---------- Top bar ---------- */
 .topbar {
   display: flex;
@@ -38,6 +46,7 @@ html, body {
   background: linear-gradient(180deg, #171d26, #12161d);
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .brand { display: flex; align-items: center; gap: 12px; }
@@ -104,7 +113,8 @@ html, body {
 .layout {
   display: grid;
   grid-template-columns: 260px 1fr 280px;
-  height: calc(100% - 61px);
+  flex: 1;
+  min-height: 0;
 }
 
 /* ---------- Palette ---------- */
