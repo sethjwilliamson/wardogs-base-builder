@@ -33,7 +33,7 @@ var CATEGORY_COLORS = {
 
 var BUILDABLES = [
   // ---- Command ----
-  { id: "fob",           name: "Forward Operating Base", cat: "Command",  w: 2, h: 2, mW: 2.03, mD: 2.0,  cost: 30,   hp: 15000, note: "Core structure — enables most buildables" },
+  { id: "fob",           name: "Forward Operating Base", cat: "Command",  w: 3, h: 3, mW: 4.07, mD: 4.0,  cost: 30,   hp: 15000, note: "Core structure — raised-floor platform is ~3×3 Hesco" },
 
   // ---- Hesco ----
   { id: "hblock",        name: "Hesco Block (Small)",    cat: "Hesco",    w: 1, h: 1, mW: 1.5,  mD: 1.5,  cost: 13,   hp: 1600 },
